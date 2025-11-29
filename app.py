@@ -207,7 +207,7 @@ st.dataframe(
     column_config={
         "爆紅機率": st.column_config.ProgressColumn(
             "爆紅機率",
-            format="%.0f%%",
+            format="%.1f%%",
             min_value=0,
             max_value=1,
         ),
