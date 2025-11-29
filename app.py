@@ -5,6 +5,17 @@ import plotly.graph_objects as go
 
 # 匯入自訂功能
 from utils.trends import display_trends_section, get_show_trend_score
+from utils.bigquery_data import (
+    get_top10_predictions,
+    get_all_titles,
+    get_title_details,
+    get_feature_importance,
+    get_model_performance,
+    test_connection
+)
+
+# 設定：是否使用真實資料
+USE_REAL_DATA = True  # 改成 True 使用 BigQuery 資料
 
 # ========== 頁面設定 ==========
 st.set_page_config(
@@ -179,66 +190,295 @@ else:
         - 預算分配參考
         - 提升 ROI
         """)
+# ========== 作品搜尋功能 ==========
+st.markdown("---")
+st.header("🔍 查詢特定作品")
 
+if USE_REAL_DATA:
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        with st.spinner("載入作品列表..."):
+            all_titles = get_all_titles()
+        
+        if all_titles:
+            selected_title = st.selectbox(
+                "選擇或搜尋作品（輸入英文名稱）",
+                options=all_titles,
+                index=0
+            )
+        else:
+            st.warning("⚠️ 無法載入作品列表")
+            selected_title = None
+    
+    with col2:
+        st.write("")
+        st.write("")
+        search_button = st.button("🔍 查詢", type="primary", use_container_width=True)
+    
+    if search_button and selected_title:
+        with st.spinner(f"正在查詢《{selected_title}》..."):
+            title_info = get_title_details(selected_title)
+        
+        if title_info:
+            st.success(f"✅ 找到作品：{selected_title}")
+            
+            # 基本資訊
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("類型", title_info.get('type', 'N/A'))
+                st.metric("國家", title_info.get('country', 'N/A'))
+            
+            with col2:
+                st.metric("語言", title_info.get('language', 'N/A'))
+                st.metric("發行年份", title_info.get('release_year', 'N/A'))
+            
+            with col3:
+                imdb = title_info.get('imdb_rating', 0)
+                st.metric("IMDb 評分", f"{imdb:.1f}/10" if imdb else 'N/A')
+                tmdb_pop = title_info.get('tmdb_popularity', 0)
+                st.metric("TMDB 熱度", f"{tmdb_pop:.1f}" if tmdb_pop else 'N/A')
+            
+            with col4:
+                weeks = title_info.get('weeks_on_top10', 0)
+                st.metric("Top 10 上榜週數", weeks if weeks else '未上榜')
+                best = title_info.get('best_rank', 0)
+                st.metric("最佳排名", f"#{best}" if best and best > 0 else '未上榜')
+            
+            # 詳細資訊
+            st.markdown("---")
+            st.subheader("📊 詳細數據")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**💰 經濟數據**")
+                budget = title_info.get('budget', 0)
+                revenue = title_info.get('revenue', 0)
+                st.write(f"- 預算：${budget:,}" if budget else "- 預算：無資料")
+                st.write(f"- 收益：${revenue:,}" if revenue else "- 收益：無資料")
+                
+                st.markdown("**📺 觀看數據**")
+                views_23 = title_info.get('views_2023', 0)
+                views_24 = title_info.get('views_2024', 0)
+                views_25 = title_info.get('views_2025', 0)
+                st.write(f"- 2023 觀看數：{views_23:,}" if views_23 else "- 2023：無資料")
+                st.write(f"- 2024 觀看數：{views_24:,}" if views_24 else "- 2024：無資料")
+                st.write(f"- 2025 觀看數：{views_25:,}" if views_25 else "- 2025：無資料")
+            
+            with col2:
+                st.markdown("**🎭 作品資訊**")
+                genres = title_info.get('genres', 'N/A')
+                st.write(f"- 類別：{genres}")
+                date_added = title_info.get('date_added', 'N/A')
+                st.write(f"- 上架日期：{date_added}")
+                
+                st.markdown("**🔮 爆紅預測**")
+                viral = title_info.get('future_viral_14d')
+                if viral == 1:
+                    st.success("✅ 預測會爆紅（未來 14 天進入 Top 10）")
+                elif viral == 0:
+                    st.warning("⚠️ 預測不會爆紅")
+                else:
+                    st.info("ℹ️ 資料不足，無法判定")
+        else:
+            st.error("❌ 查無此作品資料")
+else:
+    st.info("🔧 作品搜尋功能需要啟用 BigQuery 連接（USE_REAL_DATA = True）")
 # ========== Top 10 爆紅作品榜單 ==========
 st.markdown("---")
-st.header("🔥 預測 Top 10 爆紅作品")
+st.header("🔥 預測 Top 10 爆紅作品（未來 14 天）")
 
-# 假的 Top 10 數據
-top10_data = pd.DataFrame({
-    '排名': range(1, 11),
-    '作品名稱': [
-        'Stranger Things S5', 'Wednesday S2', 'The Crown S7',
-        'Squid Game S3', 'Bridgerton S4', 'Money Heist: Korea',
-        'The Witcher S4', 'You S5', 'Ozark: The Return', 'Dark Desire S3'
-    ],
-    '類型': ['TV Show', 'TV Show', 'TV Show', 'TV Show', 'TV Show',
-             'TV Show', 'TV Show', 'TV Show', 'TV Show', 'TV Show'],
-    '製作國家': ['US', 'US', 'UK', 'KR', 'US', 'KR', 'US', 'US', 'US', 'MX'],
-    '爆紅機率': [0.95, 0.92, 0.89, 0.87, 0.85, 0.83, 0.81, 0.79, 0.77, 0.75],
-    '預測觀看時數': ['500M', '450M', '420M', '400M', '380M', '360M', '340M', '320M', '300M', '280M']
-})
+st.info("💡 根據 XGBoost 模型預測，以下作品最有可能在未來 14 天內進入全球 Top 10 榜單")
 
-# 顯示表格
-st.dataframe(
-    top10_data,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "爆紅機率": st.column_config.ProgressColumn(
-            "爆紅機率",
-            format="%.1f%%",
-            min_value=0,
-            max_value=1,
-        ),
-    }
+if USE_REAL_DATA:
+    with st.spinner("正在從 BigQuery 載入本週預測資料..."):
+        top10_data = get_top10_predictions()
+    
+    if top10_data is not None and not top10_data.empty:
+        # 準備顯示用的 DataFrame
+        display_df = top10_data[['title', 'type', 'country', 'viral_probability']].copy()
+        display_df.columns = ['作品名稱', '類型', '製作國家', '爆紅機率']
+        display_df.insert(0, '排名', range(1, len(display_df) + 1))
+        
+        # 顯示表格
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "爆紅機率": st.column_config.ProgressColumn(
+                    "爆紅機率 (%)",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=100,
+                ),
+            }
+        )
+        
+        # 視覺化
+        fig = go.Figure(data=[
+            go.Bar(
+                x=display_df['爆紅機率'],
+                y=display_df['作品名稱'],
+                orientation='h',
+                marker=dict(
+                    color=display_df['爆紅機率'],
+                    colorscale='Reds',
+                    showscale=False
+                ),
+                text=[f"{x:.1f}%" for x in display_df['爆紅機率']],
+                textposition='auto',
+            )
+        ])
+        
+        fig.update_layout(
+            title='Top 10 作品爆紅機率視覺化',
+            xaxis_title='爆紅機率 (%)',
+            yaxis_title='',
+            height=400,
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 顯示模型資訊
+        with st.expander("📊 模型效能指標"):
+            performance = get_model_performance()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("🥇 XGBoost (主要模型)")
+                st.metric("ROC-AUC", f"{performance['XGBoost']['roc_auc']:.4f}")
+                st.metric("Accuracy", f"{performance['XGBoost']['accuracy']:.4f}")
+                st.metric("Precision", f"{performance['XGBoost']['precision']:.3f}")
+                st.metric("Recall", f"{performance['XGBoost']['recall']:.4f}")
+            
+            with col2:
+                st.subheader("📊 Logistic Regression (基準)")
+                st.metric("ROC-AUC", f"{performance['Logistic_Regression']['roc_auc']:.4f}")
+                st.metric("Accuracy", f"{performance['Logistic_Regression']['accuracy']:.4f}")
+                st.metric("Precision", f"{performance['Logistic_Regression']['precision']:.4f}")
+                st.metric("Recall", f"{performance['Logistic_Regression']['recall']:.4f}")
+            
+            st.markdown("---")
+            st.caption("💡 XGBoost 模型在 ROC-AUC 和 Precision 上表現優異，是我們的主要預測模型")
+    else:
+        st.warning("⚠️ 目前沒有預測資料，可能是：")
+        st.write("1. BigQuery 資料表尚未建立")
+        st.write("2. 本週尚未執行預測")
+        st.write("3. 資料庫連接問題")
+        
+        # 顯示假資料作為示範
+        st.info("🔧 以下顯示模擬資料作為介面展示")
+        
+        mock_data = pd.DataFrame({
+            '排名': range(1, 11),
+            '作品名稱': [
+                'Stranger Things S5', 'Wednesday S2', 'The Crown S7',
+                'Squid Game S3', 'Bridgerton S4', 'Money Heist: Korea',
+                'The Witcher S4', 'You S5', 'Ozark: The Return', 'Dark Desire S3'
+            ],
+            '類型': ['TV Show'] * 10,
+            '製作國家': ['US', 'US', 'UK', 'KR', 'US', 'KR', 'US', 'US', 'US', 'MX'],
+            '爆紅機率': [95.2, 92.8, 89.5, 87.1, 85.3, 83.0, 81.2, 79.4, 77.6, 75.8]
+        })
+        
+        st.dataframe(
+            mock_data,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "爆紅機率": st.column_config.ProgressColumn(
+                    "爆紅機率 (%)",
+                    format="%.1f%%",
+                    min_value=0,
+                    max_value=100,
+                ),
+            }
+        )
+else:
+    # 使用假資料（開發模式）
+    st.info("🔧 目前使用模擬資料進行展示")
+    
+    mock_data = pd.DataFrame({
+        '排名': range(1, 11),
+        '作品名稱': [
+            'Stranger Things S5', 'Wednesday S2', 'The Crown S7',
+            'Squid Game S3', 'Bridgerton S4', 'Money Heist: Korea',
+            'The Witcher S4', 'You S5', 'Ozark: The Return', 'Dark Desire S3'
+        ],
+        '類型': ['TV Show'] * 10,
+        '製作國家': ['US', 'US', 'UK', 'KR', 'US', 'KR', 'US', 'US', 'US', 'MX'],
+        '爆紅機率': [95.2, 92.8, 89.5, 87.1, 85.3, 83.0, 81.2, 79.4, 77.6, 75.8]
+    })
+    
+    st.dataframe(
+        mock_data,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "爆紅機率": st.column_config.ProgressColumn(
+                "爆紅機率 (%)",
+                format="%.1f%%",
+                min_value=0,
+                max_value=100,
+            ),
+        }
+    )
+# ========== Feature Importance ==========
+st.markdown("---")
+st.header("🎯 特徵重要性分析")
+
+st.write("根據 XGBoost 模型，以下是影響作品爆紅的關鍵因素（依重要性排序）：")
+
+importance_df = get_feature_importance()
+
+# 視覺化
+fig = px.bar(
+    importance_df,
+    x='importance',
+    y='feature_zh',
+    orientation='h',
+    title='XGBoost Feature Importance (by Gain)',
+    color='importance',
+    color_continuous_scale='Purples',
+    labels={'importance': 'Importance Gain', 'feature_zh': '特徵'}
 )
 
-# 視覺化 Top 10
-fig = go.Figure(data=[
-    go.Bar(
-        x=top10_data['爆紅機率'],
-        y=top10_data['作品名稱'],
-        orientation='h',
-        marker=dict(
-            color=top10_data['爆紅機率'],
-            colorscale='Reds',
-            showscale=False
-        ),
-        text=[f"{x:.0%}" for x in top10_data['爆紅機率']],
-        textposition='auto',
-    )
-])
-
 fig.update_layout(
-    title='Top 10 作品爆紅機率視覺化',
-    xaxis_title='爆紅機率',
-    yaxis_title='',
-    height=400,
+    showlegend=False,
+    height=500,
     yaxis={'categoryorder': 'total ascending'}
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
+# 解讀說明
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("""
+    **💰 經濟指標最重要：**
+    - 票房收益是最強預測因子
+    - 製作預算也有顯著影響
+    - 高投入通常帶來高回報
+    """)
+
+with col2:
+    st.markdown("""
+    **📊 社群參與度關鍵：**
+    - TMDB 投票數反映討論熱度
+    - 發行年份影響受眾偏好
+    - 近期作品更容易受關注
+    """)
+
+st.info("""
+💡 **模型洞察：** 成功的 Netflix 作品通常具備「高預算投入 + 強大社群討論度 + 優質內容評分」的組合。
+行銷團隊可以優先推廣同時滿足這三個條件的作品。
+""")
 # ========== Google Trends 分析 ==========
 display_trends_section()
 
