@@ -7,22 +7,29 @@ import streamlit as st
 import os
 from pathlib import Path
 
-# 設定 GCP 認證
-CREDENTIALS_PATH = Path(__file__).parent.parent / "credentials.json"
-if CREDENTIALS_PATH.exists():
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(CREDENTIALS_PATH)
+# # 設定 GCP 認證
+# # 使用 gcloud 登入的憑證，不需要 credentials.json
+# import google.auth
+
+# try:
+#     credentials, project = google.auth.default()
+# except Exception:
+#     # 如果沒有用 gcloud 登入，嘗試使用 credentials.json
+#     CREDENTIALS_PATH = Path(__file__).parent.parent / "credentials.json"
+#     if CREDENTIALS_PATH.exists():
+#         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(CREDENTIALS_PATH)
 
 # BigQuery 專案設定
 PROJECT_ID = "data-model-final-project"
-DATASET_FINAL = "final"
-DATASET_NETFLIX = "netflix_final"
+DATASET_FINAL = "netflix_final"  
+DATASET_PREDICTIONS = "predictions"  
 DATASET_MODELS = "models"
 
 
 @st.cache_data(ttl=3600)  # 快取 1 小時
 def get_top10_predictions():
     """
-    從 BigQuery 讀取本週的 Top 10 預測結果
+    從 BigQuery 讀取最新的 Top 10 預測結果
     
     回傳:
         DataFrame: 包含 title, type, country, viral_probability 等欄位
@@ -30,36 +37,55 @@ def get_top10_predictions():
     try:
         client = bigquery.Client(project=PROJECT_ID)
         
+        # 從 predictions.prediction_latest 讀取
+        # 提取 label=1 (會爆紅) 的機率並排序
         query = f"""
-        SELECT
-            title,
-            type,
-            country,
-            language,
-            release_year,
-            rating as imdb_rating,
-            genres,
-            predicted_future_viral_14d,
-            predicted_future_viral_14d_probs[OFFSET(1)].prob AS viral_probability
-        FROM `{PROJECT_ID}.{DATASET_NETFLIX}.prediction_this_week`
-        WHERE predicted_future_viral_14d_probs IS NOT NULL
-        ORDER BY predicted_future_viral_14d_probs[OFFSET(1)].prob DESC
+        WITH prob_extracted AS (
+            SELECT
+                type,
+                primary_genre,
+                country,
+                language,
+                imdb_rating,
+                tmdb_popularity,
+                tmdb_vote_count,
+                tmdb_vote_average,
+                log_budget,
+                log_revenue,
+                release_year,
+                duration_val,
+                predicted_future_viral_14d,
+                predicted_future_viral_14d_probs,
+                -- 提取 label=1 (爆紅) 的機率
+                (SELECT prob FROM UNNEST(predicted_future_viral_14d_probs) WHERE label = 1) as viral_prob
+            FROM `{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_latest`
+            WHERE predicted_future_viral_14d_probs IS NOT NULL
+        )
+        SELECT *
+        FROM prob_extracted
+        WHERE viral_prob IS NOT NULL
+        ORDER BY viral_prob DESC
         LIMIT 10
         """
         
         df = client.query(query).to_dataframe()
         
         if not df.empty:
-            # 轉換機率為百分比
-            df['viral_probability'] = (df['viral_probability'] * 100).round(1)
+            # 轉換為百分比
+            df['viral_probability'] = (df['viral_prob'] * 100).round(1)
+            
+            # 建立顯示用的作品名稱
+            df['title'] = df['primary_genre'] + ' (' + df['type'] + ')'
+            
             return df
         else:
             return None
         
     except Exception as e:
         st.error(f"❌ 讀取預測資料失敗：{str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
-
 
 @st.cache_data(ttl=3600)
 def get_all_titles():
@@ -72,6 +98,7 @@ def get_all_titles():
     try:
         client = bigquery.Client(project=PROJECT_ID)
         
+        # 從 final_dataset_ready 讀取
         query = f"""
         SELECT DISTINCT title
         FROM `{PROJECT_ID}.{DATASET_FINAL}.final_dataset_ready`
@@ -89,6 +116,7 @@ def get_all_titles():
 
 
 @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def get_title_details(title):
     """
     查詢特定作品的詳細資訊
@@ -102,6 +130,7 @@ def get_title_details(title):
     try:
         client = bigquery.Client(project=PROJECT_ID)
         
+        # 從 final_dataset_ready 讀取
         query = f"""
         SELECT
             title,

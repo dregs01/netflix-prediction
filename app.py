@@ -15,7 +15,7 @@ from utils.bigquery_data import (
 )
 
 # 設定：是否使用真實資料
-USE_REAL_DATA = True  # 改成 True 使用 BigQuery 資料
+USE_REAL_DATA = True  
 
 # ========== 頁面設定 ==========
 st.set_page_config(
