@@ -109,7 +109,7 @@ if USE_REAL_DATA:
                 if viral_rate is not None:
                     st.write(f"- 未來14天爆紅率：{viral_rate:.1f}%")
                 else:
-                    st.write("- 未來14天爆紅率：無預測資料")
+                    st.write("- 未來14天爆紅率：0%")
         else:
             st.error("❌ 查無此作品資料")
 else:
