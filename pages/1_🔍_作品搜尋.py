@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-from utils.bigquery_data import get_all_titles, get_title_details
+from utils.bigquery_data import get_all_titles, get_title_details, get_title_viral_rate
 from utils.sidebar import render_sidebar
 
 # ========== 設定 ==========
@@ -104,6 +104,12 @@ if USE_REAL_DATA:
                 date_added = title_info.get('date_added', 'N/A')
                 st.write(f"- 上架日期：{date_added}")
                 
+                # 取得爆紅率
+                viral_rate = get_title_viral_rate(selected_title)
+                if viral_rate is not None:
+                    st.write(f"- 未來14天爆紅率：{viral_rate:.1f}%")
+                else:
+                    st.write("- 未來14天爆紅率：無預測資料")
         else:
             st.error("❌ 查無此作品資料")
 else:

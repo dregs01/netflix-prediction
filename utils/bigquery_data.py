@@ -301,3 +301,100 @@ def test_connection():
     except Exception as e:
         st.error(f"❌ BigQuery 連接失敗：{str(e)}")
         return False
+
+
+@st.cache_data(ttl=3600)
+def get_title_viral_rate(title: str, date_str: str = None, lookback_days: int = 0):
+    """
+    取得特定作品的爆紅率（未來 14 天）
+    從 prediction_YYYYMMDD 或 prediction_latest 讀取
+    
+    參數:
+        title: str, 作品名稱
+        date_str: str, 指定日期 (YYYYMMDD 格式)
+        lookback_days: int, 向前搜尋天數
+    
+    回傳:
+        float: 爆紅率百分比 (0-100)，若無資料回傳 None
+    """
+    try:
+        client = bigquery.Client(project=PROJECT_ID)
+        
+        # 決定要查詢的表，邏輯同 get_top10_predictions()
+        table_to_query = f"{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_latest"
+
+        # 如果使用者沒有指定 date_str 且沒有要求回溯，嘗試自動尋找 dataset 中最新的 prediction_YYYYMMDD
+        if not date_str and lookback_days == 0:
+            try:
+                dataset_ref = f"{PROJECT_ID}.{DATASET_PREDICTIONS}"
+                tables = list(client.list_tables(dataset_ref))
+                latest_date = None
+                latest_table = None
+                for t in tables:
+                    tid = t.table_id
+                    if tid.startswith('prediction_') and len(tid) >= len('prediction_') + 8:
+                        suffix = tid.replace('prediction_', '')
+                        try:
+                            dt = datetime.datetime.strptime(suffix, '%Y%m%d')
+                            if latest_date is None or dt > latest_date:
+                                latest_date = dt
+                                latest_table = f"{dataset_ref}.{tid}"
+                        except Exception:
+                            continue
+                if latest_table:
+                    table_to_query = latest_table
+            except Exception:
+                pass
+
+        # 決定要檢查的日期列表
+        dates_to_try = []
+        if date_str:
+            try:
+                base_date = datetime.datetime.strptime(date_str, "%Y%m%d")
+            except Exception:
+                base_date = datetime.datetime.utcnow()
+        else:
+            base_date = datetime.datetime.utcnow()
+
+        for d in range(0, max(lookback_days, 0) + 1):
+            try_date = (base_date - datetime.timedelta(days=d)).strftime("%Y%m%d")
+            dates_to_try.append(try_date)
+
+        # 只有在使用者明確指定日期或 lookback 時，才優先採用日期回溯策略
+        if date_str or lookback_days > 0:
+            for try_date in dates_to_try:
+                candidate = f"{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_{try_date}"
+                try:
+                    client.get_table(candidate)
+                    table_to_query = candidate
+                    break
+                except Exception:
+                    continue
+
+        # 查詢該作品的爆紅率
+        query = f"""
+        SELECT
+            (SELECT prob FROM UNNEST(predicted_future_viral_14d_probs) WHERE label = 1) as viral_prob
+        FROM `{table_to_query}`
+        WHERE title = @title
+        LIMIT 1
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("title", "STRING", title)
+            ]
+        )
+
+        df = client.query(query, job_config=job_config).to_dataframe()
+
+        if not df.empty and 'viral_prob' in df.columns:
+            viral_prob = df.iloc[0]['viral_prob']
+            if viral_prob is not None:
+                return float(viral_prob) * 100
+        
+        return None
+
+    except Exception as e:
+        # 靜默失敗，不顯示錯誤訊息
+        return None
