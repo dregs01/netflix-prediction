@@ -43,9 +43,18 @@ else:
 
 if USE_REAL_DATA:
     with st.spinner("正在從 BigQuery 載入本週預測資料..."):
-        top10_data = get_top10_predictions()
-    
+        res = get_top10_predictions()
+
+    if res is not None:
+        top10_data, snapshot_table = res
+    else:
+        top10_data, snapshot_table = None, None
+
     if top10_data is not None and not top10_data.empty:
+        # 顯示使用的 snapshot table
+        if snapshot_table:
+            st.caption(f"來源資料表：{snapshot_table}")
+
         # 準備顯示用的 DataFrame
         display_df = top10_data[['title', 'type', 'country', 'viral_probability']].copy()
         display_df.columns = ['作品名稱', '類型', '製作國家', '爆紅機率']

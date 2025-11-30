@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 import os
 from pathlib import Path
+import datetime
 
 # 設定 GCP 認證
 # 使用 gcloud 登入的憑證，不需要 credentials.json
@@ -18,18 +19,74 @@ DATASET_MODELS = "models"
 
 
 @st.cache_data(ttl=3600)  # 快取 1 小時
-def get_top10_predictions():
+def get_top10_predictions(date_str: str = None, lookback_days: int = 0):
     """
     從 BigQuery 讀取最新的 Top 10 預測結果
     
     回傳:
-        DataFrame: 包含 title, type, country, viral_probability 等欄位
+        tuple: (DataFrame, snapshot_table_name) 若成功；失敗回傳 None
     """
     try:
         client = bigquery.Client(project=PROJECT_ID)
-        
-        # 從 predictions.prediction_latest 讀取
-        # 提取 label=1 (會爆紅) 的機率並排序
+        # 預設會優先嘗試使用 dataset 中最新的 snapshot table：prediction_YYYYMMDD
+        # 若找不到再回退到 prediction_latest。若使用者提供 date_str 或 lookback_days，則以該邏輯為主。
+        table_to_query = f"{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_latest"
+
+        # 如果使用者沒有指定 date_str 且沒有要求回溯，嘗試自動尋找 dataset 中最新的 prediction_YYYYMMDD
+        if not date_str and lookback_days == 0:
+            try:
+                dataset_ref = f"{PROJECT_ID}.{DATASET_PREDICTIONS}"
+                tables = list(client.list_tables(dataset_ref))
+                latest_date = None
+                latest_table = None
+                for t in tables:
+                    # t.table_id 可能是 like 'prediction_20251130' or 'prediction_latest'
+                    tid = t.table_id
+                    if tid.startswith('prediction_') and len(tid) >= len('prediction_') + 8:
+                        suffix = tid.replace('prediction_', '')
+                        # Expect suffix to be YYYYMMDD
+                        try:
+                            dt = datetime.datetime.strptime(suffix, '%Y%m%d')
+                            if latest_date is None or dt > latest_date:
+                                latest_date = dt
+                                latest_table = f"{dataset_ref}.{tid}"
+                        except Exception:
+                            continue
+                if latest_table:
+                    table_to_query = latest_table
+            except Exception:
+                # 如果列表失敗（權限等），退回到後續的日期搜尋或 prediction_latest
+                pass
+
+        # 決定要檢查的日期列表（包含指定日期或今天，並視 lookback_days 向前搜尋）
+        dates_to_try = []
+        if date_str:
+            try:
+                base_date = datetime.datetime.strptime(date_str, "%Y%m%d")
+            except Exception:
+                # 如果傳入格式不正確，改用今天
+                base_date = datetime.datetime.utcnow()
+        else:
+            base_date = datetime.datetime.utcnow()
+
+        for d in range(0, max(lookback_days, 0) + 1):
+            try_date = (base_date - datetime.timedelta(days=d)).strftime("%Y%m%d")
+            dates_to_try.append(try_date)
+
+        # 只有在使用者明確指定日期或 lookback 時，才優先採用日期回溯策略
+        if date_str or lookback_days > 0:
+            for try_date in dates_to_try:
+                candidate = f"{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_{try_date}"
+                try:
+                    # 嘗試取得 table metadata
+                    client.get_table(candidate)
+                    table_to_query = candidate
+                    break
+                except Exception:
+                    # table 不存在或無法存取，繼續下一個日期
+                    continue
+
+        # 建立查詢，從選定的 table 讀取並提取 label=1 的機率
         query = f"""
         WITH prob_extracted AS (
             SELECT
@@ -50,7 +107,7 @@ def get_top10_predictions():
                 predicted_future_viral_14d_probs,
                 -- 提取 label=1 (爆紅) 的機率
                 (SELECT prob FROM UNNEST(predicted_future_viral_14d_probs) WHERE label = 1) as viral_prob
-            FROM `{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_latest`
+            FROM `{table_to_query}`
             WHERE predicted_future_viral_14d_probs IS NOT NULL
         )
         SELECT *
@@ -59,14 +116,15 @@ def get_top10_predictions():
         ORDER BY viral_prob DESC
         LIMIT 10
         """
-        
+
         df = client.query(query).to_dataframe()
-        
+
         if not df.empty:
             # 轉換為百分比
             df['viral_probability'] = (df['viral_prob'] * 100).round(1)
 
-            return df
+            # 回傳 dataframe 與實際查詢所用的 table 名稱
+            return df, table_to_query
         else:
             return None
         

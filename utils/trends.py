@@ -136,7 +136,11 @@ def display_trends_section():
         # 僅使用 Top Predictions，固定取前 5 名作為關鍵字
         top_n = 5
         with st.spinner('正在載入預測結果...'):
-            pred_df = get_top10_predictions()
+                pred_res = get_top10_predictions()
+                if pred_res is not None:
+                    pred_df, pred_snapshot = pred_res
+                else:
+                    pred_df = None
 
         keywords = None
         if pred_df is not None and not pred_df.empty:
