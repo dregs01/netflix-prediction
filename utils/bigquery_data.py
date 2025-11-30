@@ -42,8 +42,9 @@ def get_top10_predictions():
         query = f"""
         WITH prob_extracted AS (
             SELECT
+                uid,
+                title,
                 type,
-                primary_genre,
                 country,
                 language,
                 imdb_rating,
@@ -73,10 +74,8 @@ def get_top10_predictions():
         if not df.empty:
             # 轉換為百分比
             df['viral_probability'] = (df['viral_prob'] * 100).round(1)
-            
-            # 建立顯示用的作品名稱
-            df['title'] = df['primary_genre'] + ' (' + df['type'] + ')'
-            
+
+            # `title` 與 `uid` 現在由 BigQuery 資料欄位提供，直接回傳
             return df
         else:
             return None
@@ -104,7 +103,6 @@ def get_all_titles():
         FROM `{PROJECT_ID}.{DATASET_FINAL}.final_dataset_ready`
         WHERE title IS NOT NULL
         ORDER BY title
-        LIMIT 2000
         """
         
         df = client.query(query).to_dataframe()
@@ -115,7 +113,6 @@ def get_all_titles():
         return []
 
 
-@st.cache_data(ttl=3600)
 @st.cache_data(ttl=3600)
 def get_title_details(title):
     """
@@ -130,9 +127,10 @@ def get_title_details(title):
     try:
         client = bigquery.Client(project=PROJECT_ID)
         
-        # 從 final_dataset_ready 讀取
+        # 從 final_dataset_ready 查詢
         query = f"""
         SELECT
+            uid,
             title,
             type,
             country,
@@ -171,7 +169,8 @@ def get_title_details(title):
         df = client.query(query, job_config=job_config).to_dataframe()
         
         if not df.empty:
-            return df.iloc[0].to_dict()
+            result = df.iloc[0].to_dict()
+            return result
         else:
             return None
             

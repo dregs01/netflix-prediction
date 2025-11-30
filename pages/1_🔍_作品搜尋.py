@@ -100,14 +100,6 @@ if USE_REAL_DATA:
                 date_added = title_info.get('date_added', 'N/A')
                 st.write(f"- 上架日期：{date_added}")
                 
-                st.markdown("**🔮 爆紅預測**")
-                viral = title_info.get('future_viral_14d')
-                if viral == 1:
-                    st.success("✅ 預測會爆紅（未來 14 天進入 Top 10）")
-                elif viral == 0:
-                    st.warning("⚠️ 預測不會爆紅")
-                else:
-                    st.info("ℹ️ 資料不足，無法判定")
         else:
             st.error("❌ 查無此作品資料")
 else:
