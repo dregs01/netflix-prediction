@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from utils.bigquery_data import get_all_titles, get_title_details
+from utils.sidebar import render_sidebar
 
 # ========== 設定 ==========
 USE_REAL_DATA = True  # ✅ 預設使用真實資料
@@ -11,6 +12,9 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide"
 )
+
+# Render shared sidebar
+render_sidebar()
 
 # 如果使用假資料，顯示警告
 if not USE_REAL_DATA:

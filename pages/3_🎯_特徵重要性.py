@@ -2,12 +2,16 @@ import streamlit as st
 import plotly.express as px
 
 from utils.bigquery_data import get_feature_importance
+from utils.sidebar import render_sidebar
 
 st.set_page_config(
     page_title="特徵重要性 - Netflix 預測系統",
     page_icon="🎯",
     layout="wide"
 )
+
+# Render shared sidebar
+render_sidebar()
 
 st.title("🎯 特徵重要性分析")
 st.info("✅ 以下數據來自 XGBoost 模型訓練結果（真實資料）")

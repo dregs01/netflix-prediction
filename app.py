@@ -24,56 +24,10 @@ if not USE_REAL_DATA:
     st.error("⚠️ 警告：目前使用模擬資料展示，非真實預測結果！")
 
 # Netflix 風格 CSS
-st.markdown("""
-<style>
-    /* 隱藏預設的頁面導航 */
-    [data-testid="stSidebarNav"] {
-        display: none;
-    }
-    
-    /* Netflix 紅色主題 */
-    .stButton>button {
-        background-color: #E50914;
-        color: white;
-        border-radius: 4px;
-        border: none;
-        font-weight: bold;
-    }
-    
-    .stButton>button:hover {
-        background-color: #B20710;
-    }
-    
-    /* 標題樣式 */
-    h1 {
-        color: #141414;
-    }
-    
-    /* 側邊欄樣式 */
-    [data-testid="stSidebar"] {
-        background-color: #141414;
-    }
-</style>
-""", unsafe_allow_html=True)
+from utils.sidebar import render_sidebar
 
-# ========== 側邊欄 ==========
-with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/0/08/Netflix_2015_logo.svg", width=200)
-    st.markdown("---")
-    
-    if st.button("🔥 預測 Top 10 爆紅作品", use_container_width=True):
-        st.switch_page("app.py")
-    
-    if st.button("🔍 作品搜尋", use_container_width=True):
-        st.switch_page("pages/1_🔍_作品搜尋.py")
-    
-    if st.button("🌍 Google Trends", use_container_width=True):
-        st.switch_page("pages/2_🌍_Google_Trends.py")
-    
-    if st.button("🎯 特徵重要性", use_container_width=True):
-        st.switch_page("pages/3_🎯_特徵重要性.py")
-
-    
+# Render shared sidebar
+render_sidebar()
 
 # ========== 主標題 ==========
 st.title("🎬 Netflix 作品爆紅預測系統")
