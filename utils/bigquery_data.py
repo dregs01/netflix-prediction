@@ -7,17 +7,8 @@ import streamlit as st
 import os
 from pathlib import Path
 
-# # 設定 GCP 認證
-# # 使用 gcloud 登入的憑證，不需要 credentials.json
-# import google.auth
-
-# try:
-#     credentials, project = google.auth.default()
-# except Exception:
-#     # 如果沒有用 gcloud 登入，嘗試使用 credentials.json
-#     CREDENTIALS_PATH = Path(__file__).parent.parent / "credentials.json"
-#     if CREDENTIALS_PATH.exists():
-#         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(CREDENTIALS_PATH)
+# 設定 GCP 認證
+# 使用 gcloud 登入的憑證，不需要 credentials.json
 
 # BigQuery 專案設定
 PROJECT_ID = "data-model-final-project"
@@ -75,7 +66,6 @@ def get_top10_predictions():
             # 轉換為百分比
             df['viral_probability'] = (df['viral_prob'] * 100).round(1)
 
-            # `title` 與 `uid` 現在由 BigQuery 資料欄位提供，直接回傳
             return df
         else:
             return None
@@ -182,7 +172,7 @@ def get_title_details(title):
 @st.cache_data(ttl=3600)
 def get_feature_importance():
     """
-    取得 Feature Importance (根據 XGBoost 結果)
+    取得 Feature Importance (根據 XGBoost 結果) !這是寫死的!
     
     回傳:
         DataFrame: feature 和 importance
@@ -213,7 +203,7 @@ def get_feature_importance():
 @st.cache_data(ttl=86400)  # 快取 24 小時
 def get_model_performance():
     """
-    取得模型效能指標（根據 PPT）
+    取得模型效能指標（根據 PPT）!寫死的資料!
     
     回傳:
         dict: 模型效能資訊

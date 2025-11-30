@@ -19,10 +19,6 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# GCP Credentials (重要！)
-credentials.json
-*-credentials.json
-*.json
 
 # Temporary files
 *.log
