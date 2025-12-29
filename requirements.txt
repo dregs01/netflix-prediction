@@ -1,0 +1,7 @@
+streamlit>=1.29.0
+pandas>=2.1.0
+plotly>=5.18.0
+pytrends>=4.9.0
+google-cloud-bigquery>=3.14.0
+db-dtypes>=1.1.0
+google-auth>=2.23.0
