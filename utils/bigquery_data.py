@@ -1,5 +1,6 @@
 """
 BigQuery 資料讀取功能 - Netflix 爆紅預測系統
+支援本地開發（gcloud auth）和 Streamlit Cloud（secrets）
 """
 from google.cloud import bigquery
 import pandas as pd
@@ -7,12 +8,50 @@ import streamlit as st
 import os
 from pathlib import Path
 import datetime
+from google.oauth2 import service_account
+import google.auth
 
-# 設定 GCP 認證
-# 使用 gcloud 登入的憑證，不需要 credentials.json
+# ========== GCP 認證設定 ==========
+def get_credentials():
+    """
+    取得 GCP 認證
+    - Streamlit Cloud: 使用 secrets
+    - 本地開發: 使用 gcloud auth
+    """
+    # 優先檢查 Streamlit secrets
+    try:
+        if "gcp_service_account" in st.secrets:
+            # Streamlit Cloud 環境 - 使用 secrets
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"]
+            )
+            project_id = st.secrets["gcp_service_account"]["project_id"]
+            return credentials, project_id
+    except Exception:
+        # 本地開發環境不會有 secrets，這是正常的
+        pass
+    
+    # 本地開發環境 - 使用 gcloud auth
+    try:
+        credentials, project_id = google.auth.default()
+        return credentials, project_id
+    except Exception as e:
+        st.error(f"❌ 無法取得 Google 認證: {e}")
+        st.error("請確認：")
+        st.error("• **Streamlit Cloud**: Secrets 是否正確設定")
+        st.error("• **本地開發**: 是否已執行 `gcloud auth application-default login`")
+        return None, None
+
+# 初始化認證
+CREDENTIALS, PROJECT_ID_FROM_AUTH = get_credentials()
+
+if CREDENTIALS is None:
+    st.error("⚠️ 無法初始化 GCP 認證")
+    st.info("💡 請到 Streamlit Cloud 的 **Settings → Secrets** 設定 GCP 服務帳號金鑰")
+    st.stop()
 
 # BigQuery 專案設定
-PROJECT_ID = "data-model-final-project"
+PROJECT_ID = PROJECT_ID_FROM_AUTH or "data-model-final-project"
 DATASET_FINAL = "netflix_final"  
 DATASET_PREDICTIONS = "predictions"  
 DATASET_MODELS = "models"
@@ -27,7 +66,7 @@ def get_top10_predictions(date_str: str = None, lookback_days: int = 0):
         tuple: (DataFrame, snapshot_table_name) 若成功；失敗回傳 None
     """
     try:
-        client = bigquery.Client(project=PROJECT_ID)
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         # 預設會優先嘗試使用 dataset 中最新的 snapshot table：prediction_YYYYMMDD
         # 若找不到再回退到 prediction_latest。若使用者提供 date_str 或 lookback_days，則以該邏輯為主。
         table_to_query = f"{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_latest"
@@ -143,7 +182,7 @@ def get_all_titles():
         list: 作品名稱列表
     """
     try:
-        client = bigquery.Client(project=PROJECT_ID)
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
         # 從 final_dataset_ready 讀取
         query = f"""
@@ -173,7 +212,7 @@ def get_title_details(title):
         dict: 作品詳細資訊
     """
     try:
-        client = bigquery.Client(project=PROJECT_ID)
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
         # 從 final_dataset_ready 查詢
         query = f"""
@@ -294,7 +333,7 @@ def test_connection():
         bool: 連接是否成功
     """
     try:
-        client = bigquery.Client(project=PROJECT_ID)
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         query = "SELECT 1 as test"
         result = client.query(query).result()
         return True
@@ -318,7 +357,7 @@ def get_title_viral_rate(title: str, date_str: str = None, lookback_days: int = 
         float: 爆紅率百分比 (0-100)，若無資料回傳 None
     """
     try:
-        client = bigquery.Client(project=PROJECT_ID)
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
         # 決定要查詢的表，邏輯同 get_top10_predictions()
         table_to_query = f"{PROJECT_ID}.{DATASET_PREDICTIONS}.prediction_latest"
