@@ -176,34 +176,15 @@ def get_top10_predictions(date_str: str = None, lookback_days: int = 0):
 @st.cache_data(ttl=3600)
 def get_all_titles():
     """
-    取得所有有預測資料的作品名稱
-    從最新的 prediction 資料表查詢
+    取得所有作品名稱
+    從 final_dataset_ready 資料表查詢
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
-        # Step 1: 找最新的 prediction 資料表
-        latest_table_query = f"""
-        SELECT table_name
-        FROM `{PROJECT_ID}.predictions.INFORMATION_SCHEMA.TABLES`
-        WHERE table_name LIKE 'prediction_%'
-          AND table_name != 'prediction_latest'
-        ORDER BY table_name DESC
-        LIMIT 1
-        """
-        
-        latest_table_result = client.query(latest_table_query).to_dataframe()
-        
-        if latest_table_result.empty:
-            # 如果找不到最新資料表，用 prediction_latest
-            table_name = 'prediction_latest'
-        else:
-            table_name = latest_table_result.iloc[0]['table_name']
-        
-        # Step 2: 從該資料表取得所有作品名稱
         query = f"""
         SELECT DISTINCT title
-        FROM `{PROJECT_ID}.predictions.{table_name}`
+        FROM `{PROJECT_ID}.netflix_final.final_dataset_ready`
         ORDER BY title
         """
         
@@ -222,11 +203,11 @@ def get_all_titles():
 @st.cache_data(ttl=3600)
 def get_title_details(title):
     """
-    查詢特定作品的詳細資訊，包含爆紅預測
+    查詢特定作品的詳細資訊
     
-    查詢邏輯：
-    1. 先從最新日期的 prediction 資料表查詢（與首頁邏輯一致）
-    2. 如果找不到，再從 prediction_latest 查詢（備援）
+    資料來源：
+    1. 基本資訊 → final_dataset_ready
+    2. 爆紅預測 → 優先查最新日期資料表，找不到再查 prediction_latest
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
@@ -234,9 +215,40 @@ def get_title_details(title):
         # 標準化作品名稱
         title_lower = title.lower().strip()
         
-        # ========== Step 1: 嘗試從最新日期資料表查詢 ==========
+        # ========== Part 1: 從 final_dataset_ready 查詢基本資訊 ==========
+        base_query = f"""
+        SELECT
+            title,
+            type,
+            language,
+            country,
+            release_year,
+            imdb_score,
+            tmdb_popularity,
+            weeks_in_top10,
+            highest_ranking,
+            budget,
+            revenue,
+            views_2023,
+            views_2024,
+            views_2025
+        FROM `{PROJECT_ID}.netflix_final.final_dataset_ready`
+        WHERE LOWER(title) = '{title_lower}'
+        LIMIT 1
+        """
+        
+        base_df = client.query(base_query).to_dataframe()
+        
+        if base_df.empty:
+            return None
+        
+        result = base_df.iloc[0].to_dict()
+        
+        # ========== Part 2: 查詢爆紅預測（優先最新資料表） ==========
+        viral_prob = None
+        
         try:
-            # 找出最新的 prediction 資料表
+            # Step 2.1: 找最新的 prediction 資料表
             latest_table_query = f"""
             SELECT table_name
             FROM `{PROJECT_ID}.predictions.INFORMATION_SCHEMA.TABLES`
@@ -248,85 +260,49 @@ def get_title_details(title):
             
             latest_table_result = client.query(latest_table_query).to_dataframe()
             
+            # Step 2.2: 從最新資料表查詢
             if not latest_table_result.empty:
                 latest_table = latest_table_result.iloc[0]['table_name']
                 
-                # 從最新資料表查詢
-                query = f"""
+                viral_query = f"""
                 SELECT
-                    title,
-                    type,
-                    language,
-                    country,
-                    release_year,
-                    imdb_score,
-                    tmdb_popularity,
-                    weeks_in_top10,
-                    highest_ranking,
-                    budget,
-                    revenue,
-                    views_2023,
-                    views_2024,
-                    views_2025,
-                    predicted_viral_14d_probs,
-                    (SELECT prob FROM UNNEST(predicted_viral_14d_probs) WHERE label = 1) as viral_probability_14d
+                    (SELECT prob FROM UNNEST(predicted_viral_14d_probs) WHERE label = 1) as viral_prob
                 FROM `{PROJECT_ID}.predictions.{latest_table}`
                 WHERE LOWER(title) = '{title_lower}'
                 LIMIT 1
                 """
                 
-                df = client.query(query).to_dataframe()
+                viral_df = client.query(viral_query).to_dataframe()
                 
-                if not df.empty:
-                    # 找到了，直接返回
-                    return df.iloc[0].to_dict()
+                if not viral_df.empty and viral_df['viral_prob'].notna().any():
+                    viral_prob = float(viral_df['viral_prob'].iloc[0])
         
-        except Exception as e:
-            # 最新資料表查詢失敗，繼續嘗試 prediction_latest
+        except Exception:
             pass
         
-        # ========== Step 2: 從 prediction_latest 查詢（備援） ==========
-        query_fallback = f"""
-        SELECT
-            title,
-            type,
-            language,
-            country,
-            release_year,
-            imdb_rating as imdb_score,
-            tmdb_popularity,
-            -- log_budget 和 log_revenue 需要反推回原始值
-            CASE 
-                WHEN log_budget > 0 THEN EXP(log_budget)
-                ELSE 0
-            END as budget,
-            CASE 
-                WHEN log_revenue > 0 THEN EXP(log_revenue)
-                ELSE 0
-            END as revenue,
-            predicted_future_viral_14d_probs as predicted_viral_14d_probs,
-            (SELECT prob FROM UNNEST(predicted_future_viral_14d_probs) WHERE label = 1) as viral_probability_14d
-        FROM `{PROJECT_ID}.predictions.prediction_latest`
-        WHERE LOWER(title) = '{title_lower}'
-        LIMIT 1
-        """
-        
-        df_fallback = client.query(query_fallback).to_dataframe()
-        
-        if not df_fallback.empty:
-            # 補充預設值給缺失的欄位
-            result = df_fallback.iloc[0].to_dict()
+        # Step 2.3: 如果最新資料表沒找到，查 prediction_latest
+        if viral_prob is None:
+            try:
+                viral_fallback_query = f"""
+                SELECT
+                    (SELECT prob FROM UNNEST(predicted_future_viral_14d_probs) WHERE label = 1) as viral_prob
+                FROM `{PROJECT_ID}.predictions.prediction_latest`
+                WHERE LOWER(title) = '{title_lower}'
+                LIMIT 1
+                """
+                
+                viral_fallback_df = client.query(viral_fallback_query).to_dataframe()
+                
+                if not viral_fallback_df.empty and viral_fallback_df['viral_prob'].notna().any():
+                    viral_prob = float(viral_fallback_df['viral_prob'].iloc[0])
             
-            # prediction_latest 沒有這些欄位，設為預設值
-            result.setdefault('weeks_in_top10', None)
-            result.setdefault('highest_ranking', None)
-            result.setdefault('views_2023', None)
-            result.setdefault('views_2024', None)
-            result.setdefault('views_2025', None)
-            
-            return result
-        else:
-            return None
+            except Exception:
+                pass
+        
+        # 將爆紅機率加入結果
+        result['viral_probability_14d'] = viral_prob
+        
+        return result
         
     except Exception as e:
         st.error(f"❌ 查詢失敗：{str(e)}")
