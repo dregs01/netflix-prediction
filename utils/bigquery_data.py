@@ -176,27 +176,46 @@ def get_top10_predictions(date_str: str = None, lookback_days: int = 0):
 @st.cache_data(ttl=3600)
 def get_all_titles():
     """
-    取得所有可查詢的作品列表
-    
-    回傳:
-        list: 作品名稱列表
+    取得所有有預測資料的作品名稱
+    從最新的 prediction 資料表查詢
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
-        # 從 final_dataset_ready 讀取
+        # Step 1: 找最新的 prediction 資料表
+        latest_table_query = f"""
+        SELECT table_name
+        FROM `{PROJECT_ID}.predictions.INFORMATION_SCHEMA.TABLES`
+        WHERE table_name LIKE 'prediction_%'
+          AND table_name != 'prediction_latest'
+        ORDER BY table_name DESC
+        LIMIT 1
+        """
+        
+        latest_table_result = client.query(latest_table_query).to_dataframe()
+        
+        if latest_table_result.empty:
+            # 如果找不到最新資料表，用 prediction_latest
+            table_name = 'prediction_latest'
+        else:
+            table_name = latest_table_result.iloc[0]['table_name']
+        
+        # Step 2: 從該資料表取得所有作品名稱
         query = f"""
         SELECT DISTINCT title
-        FROM `{PROJECT_ID}.{DATASET_FINAL}.final_dataset_ready`
-        WHERE title IS NOT NULL
+        FROM `{PROJECT_ID}.predictions.{table_name}`
         ORDER BY title
         """
         
         df = client.query(query).to_dataframe()
-        return df['title'].tolist()
+        
+        if not df.empty:
+            return df['title'].tolist()
+        else:
+            return []
         
     except Exception as e:
-        st.error(f"❌ 讀取作品列表失敗：{str(e)}")
+        st.error(f"❌ 無法載入作品清單：{str(e)}")
         return []
 
 
