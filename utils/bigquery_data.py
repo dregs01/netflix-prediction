@@ -296,7 +296,75 @@ def get_feature_importance():
     
     return df
 
-
+@st.cache_data(ttl=3600)
+def get_top10_churn_predictions():
+    """
+    從 BigQuery 讀取最新的 Top 10 下架預測結果
+    使用 netflix_churn_xgb_model 模型預測
+    
+    回傳:
+        DataFrame: 包含 title, type, country, churn_probability 等欄位
+    """
+    try:
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
+        
+        # 直接使用 ML.PREDICT 查詢，不需要建立額外的 table
+        query = f"""
+        WITH predictions AS (
+            SELECT
+                title,
+                type,
+                country,
+                language,
+                release_year,
+                imdb_rating,
+                tmdb_popularity,
+                predicted_label AS predicted_churn,
+                predicted_label_probs AS churn_probs
+            FROM ML.PREDICT(
+                MODEL `{PROJECT_ID}.netflix_final.netflix_churn_xgb_model`,
+                (
+                    SELECT * 
+                    FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
+                )
+            )
+        ),
+        prob_extracted AS (
+            SELECT
+                title,
+                type,
+                country,
+                language,
+                release_year,
+                imdb_rating,
+                tmdb_popularity,
+                predicted_churn,
+                -- 提取 label=1 (會下架) 的機率
+                (SELECT prob FROM UNNEST(churn_probs) WHERE label = 1) as churn_prob
+            FROM predictions
+        )
+        SELECT *
+        FROM prob_extracted
+        WHERE churn_prob IS NOT NULL
+        ORDER BY churn_prob DESC
+        LIMIT 10
+        """
+        
+        df = client.query(query).to_dataframe()
+        
+        if not df.empty:
+            # 轉換為百分比
+            df['churn_probability'] = (df['churn_prob'] * 100).round(1)
+            return df
+        else:
+            return None
+        
+    except Exception as e:
+        st.error(f"❌ 讀取下架預測失敗：{str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
+    
 @st.cache_data(ttl=86400)  # 快取 24 小時
 def get_model_performance():
     """

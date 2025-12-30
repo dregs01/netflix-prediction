@@ -62,3 +62,8 @@ def render_sidebar():
                 st.switch_page("pages/3_🎯_特徵重要性.py")
             except Exception:
                 pass
+        if st.button("📉 下架風險預測", use_container_width=True):
+            try:
+                st.switch_page("pages/4_📉_下架風險預測.py")
+            except Exception:
+                pass
