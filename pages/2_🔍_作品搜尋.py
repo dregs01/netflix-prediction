@@ -18,25 +18,13 @@ st.markdown("---")
 all_titles = get_all_titles()
 
 if all_titles:
-    # 搜尋方式選擇
-    search_method = st.radio(
-        "選擇搜尋方式",
-        ["📋 從清單選擇", "⌨️ 直接輸入"],
-        horizontal=True
+    # 直接使用下拉選單（支援輸入篩選）
+    selected_title = st.selectbox(
+        "選擇作品（輸入關鍵字可快速篩選）",
+        options=all_titles,
+        index=None,
+        placeholder="請輸入作品名稱..."
     )
-    
-    if search_method == "📋 從清單選擇":
-        selected_title = st.selectbox(
-            "選擇作品（輸入關鍵字可快速篩選）",
-            options=all_titles,
-            index=None,
-            placeholder="請選擇作品..."
-        )
-    else:
-        selected_title = st.text_input(
-            "輸入作品名稱（英文或中文名稱）",
-            placeholder="例如：Wednesday"
-        )
     
     # 搜尋按鈕
     if st.button("🔍 查詢", type="primary", use_container_width=True):
