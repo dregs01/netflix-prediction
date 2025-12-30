@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.express as px
+from PIL import Image
 
 from utils.bigquery_data import get_feature_importance
 from utils.sidebar import render_sidebar
