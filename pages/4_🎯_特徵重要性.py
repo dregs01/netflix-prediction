@@ -18,6 +18,7 @@ st.title("🎯 特徵重要性分析")
 st.info("✅ 以下數據來自 XGBoost 模型訓練結果（真實資料）")
 st.markdown("---")
 
+st.subheader("🔥 爆紅預測 - 關鍵影響因素")
 st.write("根據 XGBoost 模型，以下是影響作品爆紅的關鍵因素（依重要性排序）：")
 
 importance_df = get_feature_importance()

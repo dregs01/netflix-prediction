@@ -265,6 +265,92 @@ def get_title_details(title):
         st.error(f"❌ 查詢失敗：{str(e)}")
         return None
 
+@st.cache_data(ttl=3600)
+def get_title_churn_prediction(title):
+    """
+    查詢特定作品的下架風險預測
+    
+    Args:
+        title: 作品名稱
+    
+    Returns:
+        float: 下架機率 (0-1)，若無資料則返回 None
+    """
+    try:
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
+        
+        # 標準化作品名稱（轉小寫）
+        title_lower = title.lower().strip()
+        
+        query = f"""
+        WITH latest_snapshot AS (
+            SELECT
+                uid,
+                title,
+                date_added,
+                genres_array,
+                duration,
+                type,
+                country,
+                language,
+                release_year,
+                popularity,
+                vote_average,
+                vote_count,
+                rating,
+                ROW_NUMBER() OVER (PARTITION BY uid ORDER BY snapshot_date DESC) as rn
+            FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
+            WHERE date_added IS NOT NULL
+              AND LOWER(title) = '{title_lower}'
+        ),
+        input_data AS (
+            SELECT
+                DATE_DIFF(CURRENT_DATE(), date_added, DAY) AS days_since_added,
+                release_year,
+                popularity,
+                vote_average,
+                vote_count,
+                country,
+                language,
+                type,
+                rating,
+                ARRAY_TO_STRING(genres_array, ', ') AS genres_combo,
+                COALESCE(
+                    SAFE_CAST(
+                        REGEXP_EXTRACT(duration, r'(\\d+)') AS INT64
+                    ),
+                    0
+                ) AS duration_approx,
+                title
+            FROM latest_snapshot
+            WHERE rn = 1
+        ),
+        predictions AS (
+            SELECT
+                title,
+                predicted_future_removed_90d_probs AS churn_probs
+            FROM ML.PREDICT(
+                MODEL `{PROJECT_ID}.netflix_final.netflix_churn_xgb_model`,
+                TABLE input_data
+            )
+        )
+        SELECT
+            title,
+            (SELECT prob FROM UNNEST(churn_probs) WHERE label = 1) as churn_prob
+        FROM predictions
+        LIMIT 1
+        """
+        
+        result = client.query(query).to_dataframe()
+        
+        if not result.empty and result['churn_prob'].notna().any():
+            return float(result['churn_prob'].iloc[0])
+        else:
+            return None
+        
+    except Exception as e:
+        st.warning(f"⚠️ 無法取得下架預測：{str(e)}")
+        return None
 
 @st.cache_data(ttl=3600)
 def get_feature_importance():
