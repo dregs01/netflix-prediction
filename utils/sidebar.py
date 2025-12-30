@@ -44,23 +44,23 @@ def render_sidebar():
             except Exception:
                 # fallback: do nothing if switch_page not available
                 pass
-
+        if st.button("📉 下架風險預測", use_container_width=True):
+            try:
+                st.switch_page("pages/1_📉_下架風險預測.py")
+            except Exception:
+                pass    
         if st.button("🔍 作品搜尋", use_container_width=True):
             try:
-                st.switch_page("pages/1_🔍_作品搜尋.py")
+                st.switch_page("pages/2_🔍_作品搜尋.py")
             except Exception:
                 pass
 
         if st.button("🌍 Google Trends", use_container_width=True):
             try:
-                st.switch_page("pages/2_🌍_Google_Trends.py")
+                st.switch_page("pages/3_🌍_Google_Trends.py")
             except Exception:
                 pass
-        if st.button("📉 下架風險預測", use_container_width=True):
-            try:
-                st.switch_page("pages/3_📉_下架風險預測.py")
-            except Exception:
-                pass    
+        
 
         if st.button("🎯 特徵重要性", use_container_width=True):
             try:
