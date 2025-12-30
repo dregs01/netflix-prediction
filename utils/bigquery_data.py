@@ -308,7 +308,7 @@ def get_top10_churn_predictions():
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
-        # 直接使用 ML.PREDICT 查詢，不需要建立額外的 table
+        # 直接使用 ML.PREDICT，明確指定模型需要的所有欄位
         query = f"""
         WITH predictions AS (
             SELECT
@@ -317,14 +317,29 @@ def get_top10_churn_predictions():
                 country,
                 language,
                 release_year,
-                imdb_rating,
-                tmdb_popularity,
-                predicted_label AS predicted_churn,
-                predicted_label_probs AS churn_probs
+                rating,
+                popularity,
+                vote_average,
+                vote_count,
+                predicted_future_removed_90d AS predicted_churn,
+                predicted_future_removed_90d_probs AS churn_probs
             FROM ML.PREDICT(
                 MODEL `{PROJECT_ID}.netflix_final.netflix_churn_xgb_model`,
                 (
-                    SELECT * 
+                    -- 選擇模型訓練時使用的所有特徵
+                    SELECT 
+                        days_since_added,
+                        release_year,
+                        popularity,
+                        vote_average,
+                        vote_count,
+                        country,
+                        language,
+                        type,
+                        rating,
+                        genres_combo,
+                        duration_approx,
+                        title  -- 額外加入，用於顯示
                     FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
                 )
             )
@@ -336,8 +351,10 @@ def get_top10_churn_predictions():
                 country,
                 language,
                 release_year,
-                imdb_rating,
-                tmdb_popularity,
+                rating,
+                popularity,
+                vote_average,
+                vote_count,
                 predicted_churn,
                 -- 提取 label=1 (會下架) 的機率
                 (SELECT prob FROM UNNEST(churn_probs) WHERE label = 1) as churn_prob
