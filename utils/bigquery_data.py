@@ -300,17 +300,44 @@ def get_feature_importance():
 def get_top10_churn_predictions():
     """
     從 BigQuery 讀取最新的 Top 10 下架預測結果
-    使用 netflix_churn_xgb_model 模型預測
-    
-    回傳:
-        DataFrame: 包含 title, type, country, churn_probability 等欄位
+    動態計算 days_since_added（模擬實際預測場景）
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
-        # 直接使用 ML.PREDICT，明確指定模型需要的所有欄位
         query = f"""
-        WITH predictions AS (
+        WITH input_data AS (
+            SELECT
+                -- 動態計算 days_since_added（從今天算起）
+                DATE_DIFF(CURRENT_DATE(), date_added, DAY) AS days_since_added,
+                
+                -- 模型需要的其他特徵
+                release_year,
+                popularity,
+                vote_average,
+                vote_count,
+                country,
+                language,
+                type,
+                rating,
+                
+                -- genres_combo: 將 genres_array 轉成 string
+                ARRAY_TO_STRING(genres_array, ', ') AS genres_combo,
+                
+                -- duration_approx: 處理空值
+                COALESCE(
+                    SAFE_CAST(
+                        REGEXP_EXTRACT(duration, r'(\d+)') AS INT64
+                    ),
+                    0
+                ) AS duration_approx,
+                
+                -- 用於顯示的欄位
+                title
+            FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
+            WHERE date_added IS NOT NULL  -- 排除沒有上架日期的資料
+        ),
+        predictions AS (
             SELECT
                 title,
                 type,
@@ -325,23 +352,7 @@ def get_top10_churn_predictions():
                 predicted_future_removed_90d_probs AS churn_probs
             FROM ML.PREDICT(
                 MODEL `{PROJECT_ID}.netflix_final.netflix_churn_xgb_model`,
-                (
-                    -- 選擇模型訓練時使用的所有特徵
-                    SELECT 
-                        days_since_added,
-                        release_year,
-                        popularity,
-                        vote_average,
-                        vote_count,
-                        country,
-                        language,
-                        type,
-                        rating,
-                        genres_combo,
-                        duration_approx,
-                        title  -- 額外加入，用於顯示
-                    FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
-                )
+                TABLE input_data
             )
         ),
         prob_extracted AS (
@@ -370,7 +381,6 @@ def get_top10_churn_predictions():
         df = client.query(query).to_dataframe()
         
         if not df.empty:
-            # 轉換為百分比
             df['churn_probability'] = (df['churn_prob'] * 100).round(1)
             return df
         else:
