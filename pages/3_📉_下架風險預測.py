@@ -10,6 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
+render_sidebar()
+
 # ========== 標題 ==========
 st.title("📉 作品下架風險預測")
 st.markdown("---")
