@@ -2,6 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 from utils.bigquery_data import get_top10_churn_predictions
+from utils.sidebar import render_sidebar
 
 st.set_page_config(
     page_title="下架風險預測 - Netflix 預測系統",
