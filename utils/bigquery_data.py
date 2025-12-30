@@ -203,83 +203,118 @@ def get_all_titles():
 @st.cache_data(ttl=3600)
 def get_title_details(title):
     """
-    查詢特定作品的詳細資訊
+    查詢特定作品的詳細資訊，包含爆紅預測
     
-    參數:
-        title: str, 作品名稱
-    
-    回傳:
-        dict: 作品詳細資訊
+    查詢邏輯：
+    1. 先從最新日期的 prediction 資料表查詢（與首頁邏輯一致）
+    2. 如果找不到，再從 prediction_latest 查詢（備援）
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
-        # 從 final_dataset_ready 查詢
-        query = f"""
+        # 標準化作品名稱
+        title_lower = title.lower().strip()
+        
+        # ========== Step 1: 嘗試從最新日期資料表查詢 ==========
+        try:
+            # 找出最新的 prediction 資料表
+            latest_table_query = f"""
+            SELECT table_name
+            FROM `{PROJECT_ID}.predictions.INFORMATION_SCHEMA.TABLES`
+            WHERE table_name LIKE 'prediction_%'
+              AND table_name != 'prediction_latest'
+            ORDER BY table_name DESC
+            LIMIT 1
+            """
+            
+            latest_table_result = client.query(latest_table_query).to_dataframe()
+            
+            if not latest_table_result.empty:
+                latest_table = latest_table_result.iloc[0]['table_name']
+                
+                # 從最新資料表查詢
+                query = f"""
+                SELECT
+                    title,
+                    type,
+                    language,
+                    country,
+                    release_year,
+                    imdb_score,
+                    tmdb_popularity,
+                    weeks_in_top10,
+                    highest_ranking,
+                    budget,
+                    revenue,
+                    views_2023,
+                    views_2024,
+                    views_2025,
+                    predicted_viral_14d_probs,
+                    (SELECT prob FROM UNNEST(predicted_viral_14d_probs) WHERE label = 1) as viral_probability_14d
+                FROM `{PROJECT_ID}.predictions.{latest_table}`
+                WHERE LOWER(title) = '{title_lower}'
+                LIMIT 1
+                """
+                
+                df = client.query(query).to_dataframe()
+                
+                if not df.empty:
+                    # 找到了，直接返回
+                    return df.iloc[0].to_dict()
+        
+        except Exception as e:
+            # 最新資料表查詢失敗，繼續嘗試 prediction_latest
+            pass
+        
+        # ========== Step 2: 從 prediction_latest 查詢（備援） ==========
+        query_fallback = f"""
         SELECT
-            uid,
             title,
             type,
-            country,
             language,
+            country,
             release_year,
-            rating as imdb_rating,
-            genres,
-            date_added,
-            popularity as tmdb_popularity,
-            vote_count as tmdb_vote_count,
-            vote_average as tmdb_vote_average,
+            imdb_score,
+            tmdb_popularity,
+            weeks_in_top10,
+            highest_ranking,
             budget,
             revenue,
-            weeks_on_top10,
-            best_rank,
-            on_top10_total_views,
-            on_top10_total_hours,
             views_2023,
-            hours_2023,
             views_2024,
-            hours_2024,
             views_2025,
-            hours_2025,
-            future_viral_14d
-        FROM `{PROJECT_ID}.{DATASET_FINAL}.final_dataset_ready`
-        WHERE title = @title
+            predicted_viral_14d_probs,
+            (SELECT prob FROM UNNEST(predicted_viral_14d_probs) WHERE label = 1) as viral_probability_14d
+        FROM `{PROJECT_ID}.predictions.prediction_latest`
+        WHERE LOWER(title) = '{title_lower}'
         LIMIT 1
         """
         
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("title", "STRING", title)
-            ]
-        )
+        df_fallback = client.query(query_fallback).to_dataframe()
         
-        df = client.query(query, job_config=job_config).to_dataframe()
-        
-        if not df.empty:
-            result = df.iloc[0].to_dict()
-            return result
+        if not df_fallback.empty:
+            return df_fallback.iloc[0].to_dict()
         else:
             return None
-            
+        
     except Exception as e:
         st.error(f"❌ 查詢失敗：{str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
         return None
 
 @st.cache_data(ttl=3600)
 def get_title_churn_prediction(title):
     """
     查詢特定作品的下架風險預測
+    使用即時 ML.PREDICT 計算
     
-    Args:
-        title: 作品名稱
-    
-    Returns:
-        float: 下架機率 (0-1)，若無資料則返回 None
+    如果作品不在 leaving_final_dataset_ready 中，返回 None
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
-        # 標準化作品名稱（轉小寫）
+        # 標準化作品名稱
         title_lower = title.lower().strip()
         
         query = f"""
@@ -349,7 +384,7 @@ def get_title_churn_prediction(title):
             return None
         
     except Exception as e:
-        st.warning(f"⚠️ 無法取得下架預測：{str(e)}")
+        # 靜默失敗，不顯示錯誤訊息
         return None
 
 @st.cache_data(ttl=3600)
