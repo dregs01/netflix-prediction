@@ -274,109 +274,6 @@ def get_title_details(title):
             language,
             country,
             release_year,
-            imdb_score,
-            tmdb_popularity,
-            weeks_in_top10,
-            highest_ranking,
-            budget,
-            revenue,
-            views_2023,
-            views_2024,
-            views_2025,
-            predicted_viral_14d_probs,
-            (SELECT prob FROM UNNEST(predicted_viral_14d_probs) WHERE label = 1) as viral_probability_14d
-        FROM `{PROJECT_ID}.predictions.prediction_latest`
-        WHERE LOWER(title) = '{title_lower}'
-        LIMIT 1
-        """
-        
-        df_fallback = client.query(query_fallback).to_dataframe()
-        
-        if not df_fallback.empty:
-            return df_fallback.iloc[0].to_dict()
-        else:
-            return None
-        
-    except Exception as e:
-        st.error(f"❌ 查詢失敗：{str(e)}")
-        import traceback
-        st.error(traceback.format_exc())
-        return None
-
-@st.cache_data(ttl=3600)
-def get_title_details(title):
-    """
-    查詢特定作品的詳細資訊，包含爆紅預測
-    
-    查詢邏輯：
-    1. 先從最新日期的 prediction 資料表查詢（與首頁邏輯一致）
-    2. 如果找不到，再從 prediction_latest 查詢（備援）
-    """
-    try:
-        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
-        
-        # 標準化作品名稱
-        title_lower = title.lower().strip()
-        
-        # ========== Step 1: 嘗試從最新日期資料表查詢 ==========
-        try:
-            # 找出最新的 prediction 資料表
-            latest_table_query = f"""
-            SELECT table_name
-            FROM `{PROJECT_ID}.predictions.INFORMATION_SCHEMA.TABLES`
-            WHERE table_name LIKE 'prediction_%'
-              AND table_name != 'prediction_latest'
-            ORDER BY table_name DESC
-            LIMIT 1
-            """
-            
-            latest_table_result = client.query(latest_table_query).to_dataframe()
-            
-            if not latest_table_result.empty:
-                latest_table = latest_table_result.iloc[0]['table_name']
-                
-                # 從最新資料表查詢
-                query = f"""
-                SELECT
-                    title,
-                    type,
-                    language,
-                    country,
-                    release_year,
-                    imdb_score,
-                    tmdb_popularity,
-                    weeks_in_top10,
-                    highest_ranking,
-                    budget,
-                    revenue,
-                    views_2023,
-                    views_2024,
-                    views_2025,
-                    predicted_viral_14d_probs,
-                    (SELECT prob FROM UNNEST(predicted_viral_14d_probs) WHERE label = 1) as viral_probability_14d
-                FROM `{PROJECT_ID}.predictions.{latest_table}`
-                WHERE LOWER(title) = '{title_lower}'
-                LIMIT 1
-                """
-                
-                df = client.query(query).to_dataframe()
-                
-                if not df.empty:
-                    # 找到了，直接返回
-                    return df.iloc[0].to_dict()
-        
-        except Exception as e:
-            # 最新資料表查詢失敗，繼續嘗試 prediction_latest
-            pass
-        
-        # ========== Step 2: 從 prediction_latest 查詢（備援） ==========
-        query_fallback = f"""
-        SELECT
-            title,
-            type,
-            language,
-            country,
-            release_year,
             imdb_rating as imdb_score,
             tmdb_popularity,
             -- log_budget 和 log_revenue 需要反推回原始值
@@ -416,6 +313,88 @@ def get_title_details(title):
         st.error(f"❌ 查詢失敗：{str(e)}")
         import traceback
         st.error(traceback.format_exc())
+        return None
+
+@st.cache_data(ttl=3600)
+def get_title_churn_prediction(title):
+    """
+    查詢特定作品的下架風險預測
+    使用即時 ML.PREDICT 計算
+    """
+    try:
+        client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
+        
+        # 標準化作品名稱
+        title_lower = title.lower().strip()
+        
+        query = f"""
+        WITH latest_snapshot AS (
+            SELECT
+                uid,
+                title,
+                date_added,
+                genres_array,
+                duration,
+                type,
+                country,
+                language,
+                release_year,
+                popularity,
+                vote_average,
+                vote_count,
+                rating,
+                ROW_NUMBER() OVER (PARTITION BY uid ORDER BY snapshot_date DESC) as rn
+            FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
+            WHERE date_added IS NOT NULL
+              AND LOWER(title) = '{title_lower}'
+        ),
+        input_data AS (
+            SELECT
+                DATE_DIFF(CURRENT_DATE(), date_added, DAY) AS days_since_added,
+                release_year,
+                popularity,
+                vote_average,
+                vote_count,
+                country,
+                language,
+                type,
+                rating,
+                ARRAY_TO_STRING(genres_array, ', ') AS genres_combo,
+                COALESCE(
+                    SAFE_CAST(
+                        REGEXP_EXTRACT(duration, r'(\\d+)') AS INT64
+                    ),
+                    0
+                ) AS duration_approx,
+                title
+            FROM latest_snapshot
+            WHERE rn = 1
+        ),
+        predictions AS (
+            SELECT
+                title,
+                predicted_future_removed_90d_probs AS churn_probs
+            FROM ML.PREDICT(
+                MODEL `{PROJECT_ID}.netflix_final.netflix_churn_xgb_model`,
+                TABLE input_data
+            )
+        )
+        SELECT
+            title,
+            (SELECT prob FROM UNNEST(churn_probs) WHERE label = 1) as churn_prob
+        FROM predictions
+        LIMIT 1
+        """
+        
+        result = client.query(query).to_dataframe()
+        
+        if not result.empty and result['churn_prob'].notna().any():
+            return float(result['churn_prob'].iloc[0])
+        else:
+            return None
+        
+    except Exception as e:
+        # 靜默失敗，不顯示錯誤訊息
         return None
 
 @st.cache_data(ttl=3600)
