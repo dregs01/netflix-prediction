@@ -223,10 +223,12 @@ def get_title_details(title):
             language,
             country,
             release_year,
-            imdb_score,
-            tmdb_popularity,
-            weeks_in_top10,
-            highest_ranking,
+            rating,
+            popularity,
+            vote_count,
+            vote_average,
+            weeks_on_top10,
+            best_rank,
             budget,
             revenue,
             views_2023,
@@ -243,6 +245,14 @@ def get_title_details(title):
             return None
         
         result = base_df.iloc[0].to_dict()
+        
+        # 欄位名稱對應（統一使用前端期望的名稱）
+        result['imdb_score'] = None  # final_dataset_ready 沒有 IMDb 評分
+        result['tmdb_popularity'] = result.pop('popularity')
+        result['tmdb_vote_count'] = result.pop('vote_count')
+        result['tmdb_vote_average'] = result.pop('vote_average')
+        result['weeks_in_top10'] = result.pop('weeks_on_top10')
+        result['highest_ranking'] = result.pop('best_rank')
         
         # ========== Part 2: 查詢爆紅預測（優先最新資料表） ==========
         viral_prob = None
@@ -309,6 +319,7 @@ def get_title_details(title):
         import traceback
         st.error(traceback.format_exc())
         return None
+
 
 @st.cache_data(ttl=3600)
 def get_title_churn_prediction(title):
