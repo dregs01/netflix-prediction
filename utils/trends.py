@@ -218,7 +218,7 @@ def display_trends_section():
     with tab2:
         st.subheader("查詢特定作品的搜尋熱度")
         
-        custom_keyword = st.text_input("輸入作品名稱（英文）", "Stranger Things")
+        custom_keyword = st.text_input("輸入作品名稱（英文）")
         timeframe = st.selectbox(
             "選擇時間範圍",
             ["now 7-d", "today 1-m", "today 3-m", "today 12-m"],

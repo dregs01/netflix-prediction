@@ -163,5 +163,5 @@ else:
 
 # ========== 頁尾 ==========
 st.markdown("---")
-st.caption("📊 資料來源：Kaggle + Netflix Engagement Reports | 🤖 模型：BigQuery ML + Vertex AI")
+st.caption("📊 資料來源：Kaggle + Netflix Engagement Reports")
 st.caption("⚙️ 技術架構：Cloud Storage → BigQuery → Cloud Run → Streamlit")
