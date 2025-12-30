@@ -300,18 +300,37 @@ def get_feature_importance():
 def get_top10_churn_predictions():
     """
     從 BigQuery 讀取最新的 Top 10 下架預測結果
-    動態計算 days_since_added（模擬實際預測場景）
+    只取每部作品最新的 snapshot
     """
     try:
         client = bigquery.Client(credentials=CREDENTIALS, project=PROJECT_ID)
         
         query = f"""
-        WITH input_data AS (
+        WITH latest_snapshot AS (
             SELECT
-                -- 動態計算 days_since_added（從今天算起）
+                uid,
+                title,
+                type,
+                country,
+                language,  -- 加入這個
+                release_year,
+                rating,
+                popularity,
+                vote_average,
+                vote_count,
+                date_added,
+                duration,
+                genres_array,
+                -- 每部作品取最新的 snapshot_date
+                ROW_NUMBER() OVER (PARTITION BY uid ORDER BY snapshot_date DESC) as rn
+            FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
+            WHERE date_added IS NOT NULL
+        ),
+        input_data AS (
+            SELECT
+                -- 動態計算 days_since_added
                 DATE_DIFF(CURRENT_DATE(), date_added, DAY) AS days_since_added,
                 
-                -- 模型需要的其他特徵
                 release_year,
                 popularity,
                 vote_average,
@@ -321,21 +340,19 @@ def get_top10_churn_predictions():
                 type,
                 rating,
                 
-                -- genres_combo: 將 genres_array 轉成 string
                 ARRAY_TO_STRING(genres_array, ', ') AS genres_combo,
                 
-                -- duration_approx: 處理空值
                 COALESCE(
                     SAFE_CAST(
-                        REGEXP_EXTRACT(duration, r'(\d+)') AS INT64
+                        REGEXP_EXTRACT(duration, r'(\\d+)') AS INT64
                     ),
                     0
                 ) AS duration_approx,
                 
-                -- 用於顯示的欄位
-                title
-            FROM `{PROJECT_ID}.netflix_final.leaving_final_dataset_ready`
-            WHERE date_added IS NOT NULL  -- 排除沒有上架日期的資料
+                title,
+                uid
+            FROM latest_snapshot
+            WHERE rn = 1  -- 只取最新的 snapshot
         ),
         predictions AS (
             SELECT
@@ -367,7 +384,6 @@ def get_top10_churn_predictions():
                 vote_average,
                 vote_count,
                 predicted_churn,
-                -- 提取 label=1 (會下架) 的機率
                 (SELECT prob FROM UNNEST(churn_probs) WHERE label = 1) as churn_prob
             FROM predictions
         )
